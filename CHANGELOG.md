@@ -3,6 +3,12 @@
 All notable changes to OrderFerry are documented here. The project follows
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- Accept multiple firewall address scopes in the scheduled-task installer.
+
 ## [1.0.0] - 2026-07-15
 
 ### Added

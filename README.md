@@ -135,6 +135,15 @@ Remote access must be explicit and firewall-scoped:
 .\setup-host.ps1 -BindAddress 0.0.0.0 -RemoteAddress 10.20.30.40
 ```
 
+Multiple trusted networks can be supplied as an array. For example, to allow a
+specific LAN and the Tailscale CGNAT range:
+
+```powershell
+.\setup-host.ps1 `
+  -BindAddress 0.0.0.0 `
+  -RemoteAddress @("192.168.88.0/24", "100.64.0.0/10")
+```
+
 Remove the task and its firewall rule with:
 
 ```powershell

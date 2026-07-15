@@ -39,7 +39,7 @@ param(
     [string]$BindAddress = "127.0.0.1",
 
     [ValidateNotNullOrEmpty()]
-    [string]$RemoteAddress = "LocalSubnet",
+    [string[]]$RemoteAddress = @("LocalSubnet"),
 
     [ValidateNotNullOrEmpty()]
     [string]$TaskName = "OrderFerry",
@@ -206,7 +206,7 @@ if ($isLoopback) {
             Get-NetFirewallPortFilter |
             Set-NetFirewallPortFilter -Protocol TCP -LocalPort $Port |
             Out-Null
-        Write-OK "Firewall rule updated for $RemoteAddress"
+        Write-OK "Firewall rule updated for $($RemoteAddress -join ', ')"
     } else {
         New-NetFirewallRule `
             -DisplayName $TaskName `
@@ -218,7 +218,7 @@ if ($isLoopback) {
             -Action Allow `
             -Profile Domain,Private |
         Out-Null
-        Write-OK "Firewall rule created for $RemoteAddress"
+        Write-OK "Firewall rule created for $($RemoteAddress -join ', ')"
     }
 }
 
