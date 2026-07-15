@@ -1,0 +1,51 @@
+[project]
+name = "orderferry"
+version = "1.0.0"
+description = "Windows-hosted market-data and trade-execution relay for MetaTrader 5"
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+requires-python = ">=3.10"
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Office/Business :: Financial :: Investment",
+]
+dependencies = [
+    "MetaTrader5>=5.0.5735,<6",
+    "numpy>=2.2.6,<3",
+]
+
+[project.scripts]
+orderferry = "orderferry.app:main"
+
+[project.urls]
+Homepage = "https://github.com/ElyzeSolutions/OrderFerry"
+Repository = "https://github.com/ElyzeSolutions/OrderFerry.git"
+Issues = "https://github.com/ElyzeSolutions/OrderFerry/issues"
+Changelog = "https://github.com/ElyzeSolutions/OrderFerry/blob/main/CHANGELOG.md"
+
+[build-system]
+requires = ["uv_build>=0.11.29,<0.12.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "ruff>=0.15.21",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.uv.build-backend]
+source-include = [
+    "CHANGELOG.md",
+    "CONTRIBUTING.md",
+    "SECURITY.md",
+    "setup-host.ps1",
+    "tests/**",
+]
