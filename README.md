@@ -129,6 +129,18 @@ The installer synchronizes the locked production environment, registers an
 interactive-user scheduled task, starts it, and verifies `__ping__`. Interactive
 logon is required because the MT5 terminal is a desktop application.
 
+The `OrderFerry` task:
+
+- runs from the repository's locked `.venv` using `python -m orderferry`;
+- starts when the installing Windows user logs on;
+- runs with limited privileges after installation;
+- restarts up to ten times at one-minute intervals after an unexpected exit;
+- writes rotating logs to `./logs/orderferry.log`; and
+- ignores duplicate starts while an instance is already running.
+
+Rerunning `setup-host.ps1` updates the existing task and firewall rule, then
+restarts and verifies the relay.
+
 Remote access must be explicit and firewall-scoped:
 
 ```powershell
@@ -143,6 +155,92 @@ specific LAN and the Tailscale CGNAT range:
   -BindAddress 0.0.0.0 `
   -RemoteAddress @("192.168.88.0/24", "100.64.0.0/10")
 ```
+
+The firewall rule permits inbound TCP only on Domain and Private profiles.
+Public networks remain blocked. `100.64.0.0/10` covers Tailscale's CGNAT address
+space; exact Tailscale peer addresses are safer when only a few clients need
+access. Tailnet policy should also restrict which peers can reach the host.
+
+Check the active Windows network category before troubleshooting remote access:
+
+```powershell
+Get-NetConnectionProfile |
+  Select-Object InterfaceAlias, NetworkCategory, IPv4Connectivity
+```
+
+Do not mark an untrusted public network as Private merely to make the firewall
+rule apply.
+
+### Verify the installation
+
+Check the scheduled task and its most recent result:
+
+```powershell
+Get-ScheduledTask -TaskName OrderFerry |
+  Select-Object TaskName, State
+
+Get-ScheduledTaskInfo -TaskName OrderFerry |
+  Select-Object LastRunTime, LastTaskResult
+```
+
+Confirm that OrderFerry owns the expected listener and inspect its firewall
+scope:
+
+```powershell
+Get-NetTCPConnection -State Listen -LocalPort 18812 |
+  Select-Object LocalAddress, LocalPort, OwningProcess
+
+Get-NetFirewallRule -DisplayName OrderFerry |
+  Get-NetFirewallAddressFilter |
+  Select-Object RemoteAddress
+```
+
+Send a real protocol status request from PowerShell:
+
+```powershell
+$client = [Net.Sockets.TcpClient]::new("127.0.0.1", 18812)
+try {
+  $stream = $client.GetStream()
+  $request = [Text.Encoding]::UTF8.GetBytes(
+    "{`"id`":`"verify`",`"method`":`"__status__`"}`n"
+  )
+  $stream.Write($request, 0, $request.Length)
+  $reader = [IO.StreamReader]::new($stream)
+  $reader.ReadLine() | ConvertFrom-Json
+} finally {
+  $client.Dispose()
+}
+```
+
+For a remote client, replace `127.0.0.1` with the OrderFerry host's LAN or
+Tailscale address. A remote TCP-only check is also available:
+
+```powershell
+Test-NetConnection <ORDERFERRY_HOST> -Port 18812
+```
+
+Follow the live service log with:
+
+```powershell
+Get-Content .\logs\orderferry.log -Tail 50 -Wait
+```
+
+### Troubleshooting
+
+- **Port 18812 is already in use:** the installer stops before changing the
+  task. Find the owner with `Get-NetTCPConnection -State Listen -LocalPort
+  18812`, stop the conflicting process, or install with a different `-Port`.
+- **`LastTaskResult` is `267009` (`0x41301`):** this means the task is currently
+  running; it is not an error. If the task has stopped with another result,
+  inspect `./logs/orderferry.log` and the Task Scheduler history.
+- **Local access works but remote access fails:** confirm that the server was
+  installed with a non-loopback `-BindAddress`, the client address falls within
+  `-RemoteAddress`, and the active interface uses the Domain or Private profile.
+- **MT5 reports disconnected:** keep the Windows user logged on, open the MT5
+  terminal, confirm the trading account is connected, and enable Algo Trading.
+  OrderFerry remains available in degraded mode and retries automatically.
+- **The task exits immediately:** check whether another process owns the port,
+  then review the log for configuration, bind, or Python environment errors.
 
 Remove the task and its firewall rule with:
 
