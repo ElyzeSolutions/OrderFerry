@@ -21,6 +21,9 @@
 .PARAMETER TaskName
     Scheduled Task and firewall-rule name. Defaults to OrderFerry.
 
+.PARAMETER MinimumTerminalMaxBars
+    Minimum MT5 terminal history capacity reported as history-ready. Defaults to 100000.
+
 .EXAMPLE
     .\setup-host.ps1
 
@@ -43,6 +46,9 @@ param(
 
     [ValidateNotNullOrEmpty()]
     [string]$TaskName = "OrderFerry",
+
+    [ValidateRange(1000, 10000000)]
+    [int]$MinimumTerminalMaxBars = 100000,
 
     [switch]$Uninstall
 )
@@ -249,7 +255,8 @@ if ($existingTask -and $existingTask.State -eq "Running") {
 Write-Step "Registering scheduled task"
 $actionArguments = (
     "-u -m orderferry --bind `"$BindAddress`" --port $Port " +
-    "--log-dir `"$LogDir`""
+    "--log-dir `"$LogDir`" " +
+    "--minimum-terminal-maxbars $MinimumTerminalMaxBars"
 )
 $action = New-ScheduledTaskAction `
     -Execute $VenvPython `

@@ -11,6 +11,7 @@ from collections.abc import Callable
 from typing import Any
 
 from orderferry.responses import Response, error, success
+from orderferry.protocol import PROTOCOL_VERSION
 from orderferry.runtime import Mt5Runtime
 from orderferry.serialization import to_jsonable
 
@@ -368,8 +369,10 @@ class BridgeServer:
         connected = runtime_status.connected
         info: dict[str, Any] = {
             "connected": connected,
+            "protocol_version": PROTOCOL_VERSION,
             "uptime_s": round(time.time() - self._started_at),
         }
+        terminal_maxbars = None
         if runtime_status.error_message:
             info["connection_error"] = {
                 "code": runtime_status.error_code,
@@ -382,6 +385,7 @@ class BridgeServer:
                     normalized = to_jsonable(terminal)
                     info["mt5_build"] = normalized.get("build")
                     info["mt5_connected"] = normalized.get("connected", False)
+                    terminal_maxbars = normalized.get("maxbars")
             except Exception as exc:
                 log.debug("could not read terminal status: %s", exc)
 
@@ -399,6 +403,17 @@ class BridgeServer:
                     )
             except Exception as exc:
                 log.debug("could not read account status: %s", exc)
+
+        required_maxbars = self.mt5.config.minimum_terminal_maxbars
+        maxbars_satisfied = (
+            isinstance(terminal_maxbars, int) and terminal_maxbars >= required_maxbars
+        )
+        info["terminal_history"] = {
+            "actual_maxbars": terminal_maxbars,
+            "minimum_maxbars": required_maxbars,
+            "satisfied": maxbars_satisfied,
+        }
+        info["ready_for_history"] = connected and maxbars_satisfied
 
         with self._clients_lock:
             info["clients"] = len(self._clients)

@@ -1,6 +1,6 @@
 [project]
 name = "orderferry"
-version = "1.0.0"
+version = "1.1.0"
 description = "Windows-hosted market-data and trade-execution relay for MetaTrader 5"
 readme = "README.md"
 license = "Apache-2.0"

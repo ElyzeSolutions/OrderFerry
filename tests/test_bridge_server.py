@@ -4,6 +4,7 @@ import json
 import socket
 import threading
 import unittest
+from collections import namedtuple
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -98,6 +99,28 @@ class ClientBoundaryTests(unittest.TestCase):
 
 
 class WatchdogTests(unittest.TestCase):
+    def test_status_reports_durable_terminal_history_requirement(self):
+        runtime = Mock()
+        runtime.status = Mt5ConnectionStatus(connected=True)
+        runtime.config.minimum_terminal_maxbars = 100_000
+        terminal = namedtuple("TerminalInfo", "build connected maxbars")
+        runtime.terminal_info.return_value = terminal(5833, True, 50_000)
+        runtime.account_info.return_value = None
+        server = BridgeServer(runtime, dispatcher=lambda *_args: {"ok": True})
+
+        status = server.get_status()
+
+        self.assertEqual(status["protocol_version"], 2)
+        self.assertFalse(status["ready_for_history"])
+        self.assertEqual(
+            status["terminal_history"],
+            {
+                "actual_maxbars": 50_000,
+                "minimum_maxbars": 100_000,
+                "satisfied": False,
+            },
+        )
+
     def test_disconnected_runtime_is_retried_until_connected(self):
         class RecoveringRuntime:
             def __init__(self):

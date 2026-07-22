@@ -84,9 +84,9 @@ stable error envelope:
 
 | Area | Methods |
 | --- | --- |
-| Health | `__ping__`, `__status__`, `__constants__` |
+| Health | `__ping__`, `__status__`, `__constants__`, `__capabilities__` |
 | Streaming | `__subscribe__`, `__unsubscribe__` |
-| Market data | `symbol_info`, `symbol_info_tick`, `symbols_get`, `copy_rates_*`, `copy_ticks_*` |
+| Market data | `__rates_page__`, `symbol_info`, `symbol_info_tick`, `symbols_get`, `copy_rates_*`, `copy_ticks_*` |
 | Account | `account_info`, `positions_*`, `orders_*`, `history_orders_*`, `history_deals_*` |
 | High-level trading | `buy`, `sell`, `buy_limit`, `sell_limit`, `buy_stop`, `sell_stop` |
 | Position/order control | `close_position`, `close_all`, `modify_position`, `modify_order`, `cancel_order` |
@@ -101,6 +101,12 @@ Subscribe with symbols in `args` and an optional interval in milliseconds:
 The server then emits `{"event":"tick", ...}` objects when bid or ask changes.
 The minimum interval is 50 ms.
 
+Large replay exports should use `__rates_page__`, which caps each response at 4,096 bars and
+returns an opaque `snapshot_id`. Send that identifier with every subsequent page. If a new
+current bar opens during the export, OrderFerry returns `HISTORY_SNAPSHOT_CHANGED`; restart the
+export rather than combining two market snapshots. Each page also returns the bound MT5 login
+and broker server so consumers can reject misattributed history.
+
 ## Configuration
 
 | Variable | Purpose |
@@ -108,6 +114,7 @@ The minimum interval is 50 ms.
 | `ORDERFERRY_BIND` | Listen address; defaults to `127.0.0.1` |
 | `ORDERFERRY_PORT` | Listen port; defaults to `18812` |
 | `ORDERFERRY_LOG_DIR` | Rotating log directory; defaults to `./logs` |
+| `ORDERFERRY_MINIMUM_TERMINAL_MAXBARS` | Minimum terminal history capacity reported as ready; defaults to `100000` |
 | `MT5_PATH` | Optional path to `terminal64.exe` |
 | `MT5_ACCOUNT` | Optional numeric account login |
 | `MT5_PASSWORD` | Optional account password |
@@ -153,7 +160,8 @@ specific LAN and the Tailscale CGNAT range:
 ```powershell
 .\setup-host.ps1 `
   -BindAddress 0.0.0.0 `
-  -RemoteAddress @("192.168.88.0/24", "100.64.0.0/10")
+  -RemoteAddress @("192.168.88.0/24", "100.64.0.0/10") `
+  -MinimumTerminalMaxBars 100000
 ```
 
 The firewall rule permits inbound TCP only on Domain and Private profiles.

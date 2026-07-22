@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 from orderferry.runtime import (
     ConfigurationError,
+    HistorySnapshotChangedError,
     Mt5Config,
     Mt5Runtime,
 )
@@ -21,6 +22,8 @@ class FakeMt5:
         self.shutdown_calls = 0
         self.active_calls = 0
         self.max_active_calls = 0
+        self.current_bar_time = 1_700_000_000
+        self.account_login = 1234
 
     def initialize(self, *args, **kwargs):
         self.initialize_calls.append((args, kwargs))
@@ -32,13 +35,23 @@ class FakeMt5:
     def terminal_info(self):
         if not self.initialize_result:
             return None
-        return SimpleNamespace(name="Terminal", build=123, connected=True)
+        return SimpleNamespace(name="Terminal", build=123, connected=True, maxbars=100_000)
+
+    def copy_rates_from_pos(self, _symbol, _timeframe, start_pos, count):
+        return [
+            {"time": self.current_bar_time - (start_pos + offset) * 3600} for offset in range(count)
+        ]
 
     def version(self):
         return (5, 0, 123)
 
     def account_info(self):
-        return SimpleNamespace(login=1234, balance=10.0, currency="USD")
+        return SimpleNamespace(
+            login=self.account_login,
+            server="Broker-Demo",
+            balance=10.0,
+            currency="USD",
+        )
 
     def shutdown(self):
         self.shutdown_calls += 1
@@ -73,6 +86,15 @@ class Mt5ConfigTests(unittest.TestCase):
                 },
             ),
         )
+
+        configured = Mt5Config.from_environment({"ORDERFERRY_MINIMUM_TERMINAL_MAXBARS": "250000"})
+        self.assertEqual(configured.minimum_terminal_maxbars, 250_000)
+
+        overridden = Mt5Config.from_environment(
+            {"ORDERFERRY_MINIMUM_TERMINAL_MAXBARS": "invalid"},
+            minimum_terminal_maxbars=100_000,
+        )
+        self.assertEqual(overridden.minimum_terminal_maxbars, 100_000)
 
     def test_rejects_invalid_account_instead_of_silently_ignoring_it(self):
         with self.assertRaisesRegex(ConfigurationError, "must be an integer"):
@@ -116,6 +138,45 @@ class Mt5RuntimeTests(unittest.TestCase):
 
         self.assertEqual(module.max_active_calls, 1)
         self.assertEqual(runtime.SOME_CONSTANT, 42)
+
+    def test_history_pages_share_a_stable_current_bar_anchor(self):
+        module = FakeMt5()
+        runtime = Mt5Runtime(module, Mt5Config())
+        first = runtime.rates_page("XAUUSD", 16385, 0, 3, None)
+
+        second = runtime.rates_page(
+            "XAUUSD",
+            16385,
+            2,
+            3,
+            first["snapshot_id"],
+        )
+        self.assertEqual(second["snapshot_id"], first["snapshot_id"])
+        self.assertEqual(second["terminal_maxbars"], 100_000)
+        self.assertEqual(second["account_login"], 1234)
+        self.assertEqual(second["account_server"], "Broker-Demo")
+
+        module.current_bar_time += 3600
+        with self.assertRaises(HistorySnapshotChangedError):
+            runtime.rates_page("XAUUSD", 16385, 4, 3, first["snapshot_id"])
+
+        module.current_bar_time -= 3600
+        module.account_login = 5678
+        with self.assertRaises(HistorySnapshotChangedError):
+            runtime.rates_page("XAUUSD", 16385, 4, 3, first["snapshot_id"])
+
+    def test_history_page_rejects_a_rollover_inside_one_read(self):
+        class RollingFakeMt5(FakeMt5):
+            def copy_rates_from_pos(self, symbol, timeframe, start_pos, count):
+                bars = super().copy_rates_from_pos(symbol, timeframe, start_pos, count)
+                if count > 1:
+                    self.current_bar_time += 3600
+                return bars
+
+        runtime = Mt5Runtime(RollingFakeMt5(), Mt5Config())
+
+        with self.assertRaises(HistorySnapshotChangedError):
+            runtime.rates_page("XAUUSD", 16385, 0, 3, None)
 
 
 if __name__ == "__main__":

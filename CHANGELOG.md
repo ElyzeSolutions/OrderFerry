@@ -5,6 +5,13 @@ All notable changes to OrderFerry are documented here. The project follows
 
 ## [Unreleased]
 
+### Added
+
+- Add a bounded, snapshot-stable `__rates_page__` history export contract and protocol
+  capability discovery for large broker replay datasets.
+- Persist the required terminal `maxbars` threshold in the scheduled-task command and expose
+  actual/required history readiness through `__status__`.
+
 ### Fixed
 
 - Accept multiple firewall address scopes in the scheduled-task installer.

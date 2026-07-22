@@ -54,6 +54,15 @@ def _parser() -> argparse.ArgumentParser:
         help="rotating log directory (default: ./logs)",
     )
     parser.add_argument(
+        "--minimum-terminal-maxbars",
+        type=int,
+        default=None,
+        help=(
+            "minimum terminal history capacity reported in readiness "
+            "(default: ORDERFERRY_MINIMUM_TERMINAL_MAXBARS or 100000)"
+        ),
+    )
+    parser.add_argument(
         "--test",
         action="store_true",
         help="test MetaTrader connectivity and exit",
@@ -79,8 +88,10 @@ def _remove_file_logging(handler: RotatingFileHandler) -> None:
     handler.close()
 
 
-def _runtime() -> Mt5Runtime:
-    return Mt5Runtime.from_environment()
+def _runtime(minimum_terminal_maxbars: int | None) -> Mt5Runtime:
+    return Mt5Runtime.from_environment(
+        minimum_terminal_maxbars=minimum_terminal_maxbars,
+    )
 
 
 def _self_test(mt5: Mt5Runtime) -> bool:
@@ -144,11 +155,15 @@ def _serve(args: argparse.Namespace, mt5: Mt5Runtime) -> int:
 def main(argv: Sequence[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format=LOG_FORMAT)
     args = _parser().parse_args(argv)
+    if args.minimum_terminal_maxbars is not None and not (
+        1_000 <= args.minimum_terminal_maxbars <= 10_000_000
+    ):
+        _parser().error("--minimum-terminal-maxbars must be between 1000 and 10000000")
     handler = _add_file_logging(args.log_dir)
     try:
         log.info("OrderFerry %s logging to %s", __version__, handler.baseFilename)
         try:
-            mt5 = _runtime()
+            mt5 = _runtime(args.minimum_terminal_maxbars)
         except ConfigurationError as exc:
             log.error("invalid configuration: %s", exc)
             return 2

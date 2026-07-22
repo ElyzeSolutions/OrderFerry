@@ -6,10 +6,14 @@ import logging
 from typing import Any
 
 from orderferry.responses import Response, error, success
+from orderferry.runtime import HistorySnapshotChangedError, HistoryUnavailableError
 from orderferry.serialization import to_jsonable
 from orderferry.trading import TRADE_METHODS, dispatch_trade, trade_response
 
 log = logging.getLogger("orderferry.protocol")
+
+PROTOCOL_VERSION = 2
+MAX_HISTORY_PAGE_BARS = 4_096
 
 _CONSTANT_NAMES = (
     "TIMEFRAME_M1",
@@ -96,7 +100,11 @@ _RAW_METHODS = frozenset(
         "last_error",
     }
 )
-ALLOWED_METHODS = _RAW_METHODS | TRADE_METHODS | frozenset({"__ping__", "__constants__"})
+ALLOWED_METHODS = (
+    _RAW_METHODS
+    | TRADE_METHODS
+    | frozenset({"__ping__", "__constants__", "__capabilities__", "__rates_page__"})
+)
 
 
 def _constants(mt5: Any) -> dict[str, int]:
@@ -115,6 +123,17 @@ def dispatch(
 ) -> Response:
     if method == "__ping__":
         return success("pong")
+    if method == "__capabilities__":
+        return success(
+            {
+                "protocol_version": PROTOCOL_VERSION,
+                "history": {
+                    "method": "__rates_page__",
+                    "max_page_bars": MAX_HISTORY_PAGE_BARS,
+                    "stable_snapshot": True,
+                },
+            }
+        )
     if method == "__constants__":
         return success(_constants(mt5))
     if method not in ALLOWED_METHODS:
@@ -125,6 +144,9 @@ def dispatch(
             "MT5_DISCONNECTED",
             "MetaTrader is disconnected; the watchdog is reconnecting",
         )
+
+    if method == "__rates_page__":
+        return _rates_page(mt5, args, kwargs)
 
     try:
         if method in TRADE_METHODS:
@@ -154,3 +176,62 @@ def dispatch(
     except Exception as exc:
         log.warning("dispatch failed for %s: %s", method, exc)
         return error(method, "EXCEPTION", f"{type(exc).__name__}: {exc}")
+
+
+def _rates_page(
+    mt5: Any,
+    args: list[Any],
+    kwargs: dict[str, Any],
+) -> Response:
+    method = "__rates_page__"
+    allowed = {"symbol", "timeframe", "start_pos", "count", "snapshot_id"}
+    if args or set(kwargs) - allowed:
+        return error(method, "INVALID_ARGS", "rates page accepts only documented options")
+    symbol = kwargs.get("symbol")
+    timeframe = kwargs.get("timeframe")
+    start_pos = kwargs.get("start_pos", 0)
+    count = kwargs.get("count")
+    snapshot_id = kwargs.get("snapshot_id")
+    if not isinstance(symbol, str) or not symbol:
+        return error(method, "INVALID_ARGS", "symbol must be a non-empty string")
+    if isinstance(timeframe, bool) or not isinstance(timeframe, int) or timeframe <= 0:
+        return error(method, "INVALID_ARGS", "timeframe must be a positive integer")
+    if isinstance(start_pos, bool) or not isinstance(start_pos, int) or start_pos < 0:
+        return error(method, "INVALID_ARGS", "start_pos must be a non-negative integer")
+    if (
+        isinstance(count, bool)
+        or not isinstance(count, int)
+        or not 1 <= count <= MAX_HISTORY_PAGE_BARS
+    ):
+        return error(
+            method,
+            "INVALID_ARGS",
+            f"count must be between 1 and {MAX_HISTORY_PAGE_BARS}",
+        )
+    if snapshot_id is not None and (not isinstance(snapshot_id, str) or len(snapshot_id) != 64):
+        return error(method, "INVALID_ARGS", "snapshot_id must be a 64-character string")
+    try:
+        page = mt5.rates_page(symbol, timeframe, start_pos, count, snapshot_id)
+    except HistorySnapshotChangedError as exc:
+        return error(method, "HISTORY_SNAPSHOT_CHANGED", str(exc))
+    except HistoryUnavailableError as exc:
+        return error(method, "HISTORY_UNAVAILABLE", str(exc))
+    except TimeoutError as exc:
+        return error(method, "MT5_BUSY", f"MetaTrader is busy: {exc}")
+    except Exception as exc:
+        log.warning("history page failed: %s", exc)
+        return error(method, "EXCEPTION", f"{type(exc).__name__}: {exc}")
+    normalized = to_jsonable(page)
+    bars = normalized.get("bars") if isinstance(normalized, dict) else None
+    if not isinstance(bars, list):
+        return error(method, "HISTORY_UNAVAILABLE", "MetaTrader returned no history page")
+    normalized.update(
+        {
+            "symbol": symbol,
+            "timeframe": timeframe,
+            "start_pos": start_pos,
+            "requested_count": count,
+            "returned_count": len(bars),
+        }
+    )
+    return success(normalized)
